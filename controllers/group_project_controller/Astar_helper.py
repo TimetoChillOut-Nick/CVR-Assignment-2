@@ -2,7 +2,7 @@ import heapq
 """
 Using A* to find the shortest distance to the closest view station.
 To keep it simple we used manhatten Distance as it seemed logical to use with the grid layout
-only being 4 directions (L-R-U-D)
+only being 4 directions (U-D-L-R)
 """
 
 def astar(grid, start, goal):
@@ -57,3 +57,26 @@ def astar(grid, start, goal):
                 heapq.heappush(open_heap, (f_score, neighbor))
 
     return None  #ran out of cells to explore, goal is unreachable
+
+
+
+#Quick test to see if the function actually works in a vacuum
+if __name__ == "__main__":
+    import numpy as np
+
+    test_grid = np.array([
+        [0, 0, 0, 0, 0],
+        [0, 1, 1, 1, 0],
+        [0, 0, 0, 1, 0],
+        [1, 1, 0, 1, 0],
+        [0, 0, 0, 0, 0],
+    ])
+
+    path = astar(test_grid, (0, 0), (4, 4))
+    print("path:", path)
+
+    assert path is not None, "no path"
+    assert path[0] == (0, 0) and path[-1] == (4, 4), "path should start/end at start/goal"
+    assert all(test_grid[r, c] == 0 for r, c in path), "path ignores an obstacle"
+
+    print("astar dummy test passed")
