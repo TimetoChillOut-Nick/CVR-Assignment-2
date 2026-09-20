@@ -31,3 +31,14 @@ def station_by_id(station_id):
 
 def start_by_id(start_id):
     return next(s for s in CONFIG["starts"] if s["id"] == start_id)
+
+
+"""Coordinate Helpers built by the team"""
+#Gen a list of all stations
+def station_coordinates():    
+    coords = []
+    for s in CONFIG["stations"]:
+        x, y = s["observe"]
+        row, col = world_to_grid(x, y)
+        coords.append({"id": s["id"], "world": (x, y), "grid": (row, col)})
+    return coords
