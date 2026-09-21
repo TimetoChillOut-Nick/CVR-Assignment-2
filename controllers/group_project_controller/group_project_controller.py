@@ -14,7 +14,7 @@ import cv2
 import numpy as np
 from controller import Robot
 
-from project_utils import CONFIG, ROOT, world_to_grid, grid_to_world, station_coordinates
+from project_utils import CONFIG, ROOT, world_to_grid, grid_to_world, station_coordinates, path_to_waypoints
 from Astar_helper import astar
 
 
@@ -81,7 +81,7 @@ def proximity_values():
 def find_closest_station(grid, start_rc, stations):
     best_station = None
     best_path = None
-    scores = []  # (station_id, steps or None if unreachable), for printing
+    scores = []  #For printing
     #Loop through each station and save them with their score
     for station in stations:
         path = astar(grid, start_rc, station["grid"])
@@ -94,6 +94,70 @@ def find_closest_station(grid, start_rc, stations):
             best_path = path
     return best_station, best_path, scores
 
+
+#Default movement setup ## tune this
+MOVE_SPEED = 5.0 #Straightline Speed
+TURN_SPEED = 4.0 #Turn Speed
+BUCKET_ANGLE = (0.0, math.pi / 2, math.pi, -math.pi / 2)  #east, north, west, south
+
+
+def heading_bucket(yaw):
+    return round(yaw / (math.pi / 2)) % 4
+
+
+def target_bucket(dx, dy):
+    if abs(dx) >= abs(dy):
+        return 0 if dx > 0 else 2 #east or west
+    else:
+        return 1 if dy > 0 else 3 #north or south
+
+
+def drive_step(pose, waypoints, nav_state):
+    if nav_state["phase"] == "DONE" or nav_state["index"] >= len(waypoints):
+        nav_state["phase"] = "DONE"
+        set_speed(0.0, 0.0)
+        return
+
+    x, y, yaw = pose
+    tx, ty = waypoints[nav_state["index"]]
+    dx, dy = tx - x, ty - y
+
+    if nav_state["phase"] == "ROTATE":
+        target_angle = BUCKET_ANGLE[target_bucket(dx, dy)]
+        error = math.remainder(target_angle - yaw, 2 * math.pi) 
+
+        if "turn_left" not in nav_state:
+            nav_state["turn_left"] = error > 0
+
+        arrived = error <= 0 if nav_state["turn_left"] else error >= 0
+        if arrived:
+            nav_state.pop("turn_left", None)
+            nav_state["phase"] = "DRIVE"
+        elif nav_state["turn_left"]:
+            set_speed(-TURN_SPEED, TURN_SPEED)
+        else:
+            set_speed(TURN_SPEED, -TURN_SPEED)
+
+    elif nav_state["phase"] == "DRIVE":
+        #Check Snap to cardinal direction
+        heading = heading_bucket(yaw)
+        if heading == 0:
+            arrived = x >= tx #east
+        elif heading == 1:
+            arrived = y >= ty #north
+        elif heading == 2:
+            arrived = x <= tx #west
+        else:
+            arrived = y <= ty #south
+
+        if arrived:
+            nav_state["index"] += 1
+            nav_state["phase"] = "ROTATE" if nav_state["index"] < len(waypoints) else "DONE"
+            set_speed(0.0, 0.0)
+        else:
+            set_speed(MOVE_SPEED, MOVE_SPEED)
+
+
 # ------------------------------------------------------------------
 # Main
 # ------------------------------------------------------------------
@@ -105,18 +169,17 @@ def main():
     print("Camera:", camera.getWidth(), "x", camera.getHeight())
 
 
-    searched = False  #Setup to run once to test the A* search before finalizing
+    searched = False #run the search once, on the first valid tick
+    waypoints = []
+    nav_state = {"index": 0, "phase": "DONE"}
 
     while robot.step(timestep) != -1:
         pose = get_pose()
 
         if not searched:
-            ###Just some stuff to test the A*
-            #Convert to grid
             start_rc = world_to_grid(pose[0], pose[1])
             print(f"Starting grid location: {start_rc}")
 
-            #Search for closest station
             closest_station, path, scores = find_closest_station(GRID, start_rc, station_coordinates())
 
             print("Station scores (steps to reach):")
@@ -127,12 +190,12 @@ def main():
                 print("No reachable station found")
             else:
                 print(f"Moving to closest station: {closest_station['id']}")
-                print("Moving")
+                waypoints = path_to_waypoints(path)
+                nav_state = {"index": 0, "phase": "ROTATE" if waypoints else "DONE"}
 
             searched = True
-            ###Stops here
 
-        set_speed(0.0, 0.0)
+        drive_step(pose, waypoints, nav_state)
 
 
 if __name__ == "__main__":

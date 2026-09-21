@@ -35,10 +35,30 @@ def start_by_id(start_id):
 
 """Coordinate Helpers built by the team"""
 #Gen a list of all stations
-def station_coordinates():    
+def station_coordinates():
     coords = []
     for s in CONFIG["stations"]:
         x, y = s["observe"]
         row, col = world_to_grid(x, y)
         coords.append({"id": s["id"], "world": (x, y), "grid": (row, col)})
     return coords
+
+
+#Turn astar path into waypoints at turning pointss
+def path_to_waypoints(path):
+    if not path or len(path) < 2:
+        return []  #if no path or at desination
+
+    waypoints = []
+    prev_dir = None
+    for i in range(1, len(path)):
+        r0, c0 = path[i - 1]
+        r1, c1 = path[i]
+        direction = (r1 - r0, c1 - c0)
+        if prev_dir is not None and direction != prev_dir:
+            #direction changed stored here
+            waypoints.append(grid_to_world(*path[i - 1]))
+        prev_dir = direction
+
+    waypoints.append(grid_to_world(*path[-1]))  #always end at goal
+    return waypoints
