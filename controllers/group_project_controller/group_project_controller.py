@@ -74,6 +74,11 @@ def proximity_values():
     return [sensor.getValue() for sensor in ps]
 
 
+def detect_target(frame):
+    """Placeholder for real target detection; always reports not-found for now."""
+    return False
+
+
 # ------------------------------------------------------------------
 # Group implementation
 # ------------------------------------------------------------------
@@ -158,6 +163,21 @@ def drive_step(pose, waypoints, nav_state):
             set_speed(MOVE_SPEED, MOVE_SPEED)
 
 
+def search_step(pose, search_state):
+    """Spin in place scanning for the target. Returns True once a full revolution completes."""
+    yaw = pose[2]
+    delta = math.remainder(yaw - search_state["prev_yaw"], 2 * math.pi)
+    search_state["accumulated"] += abs(delta)
+    search_state["prev_yaw"] = yaw
+
+    if search_state["accumulated"] >= 2 * math.pi:
+        set_speed(0.0, 0.0)
+        return True
+
+    set_speed(-TURN_SPEED, TURN_SPEED)
+    return False
+
+
 # ------------------------------------------------------------------
 # Main
 # ------------------------------------------------------------------
@@ -169,33 +189,64 @@ def main():
     print("Camera:", camera.getWidth(), "x", camera.getHeight())
 
 
-    searched = False #run the search once, on the first valid tick
+    #State machine:
+    #NAVIGATION Drive to closest Station
+    #SEARCH Search for the detected target
+    #Found Move to the detected target
+    """^^This needs to be put inside the safety Catch"""
+    state = "NAVIGATION"
+    need_path = True
+    remaining_stations = station_coordinates()
+    current_station = None
     waypoints = []
     nav_state = {"index": 0, "phase": "DONE"}
+    search_state = None
 
     while robot.step(timestep) != -1:
         pose = get_pose()
 
-        if not searched:
-            start_rc = world_to_grid(pose[0], pose[1])
-            print(f"Starting grid location: {start_rc}")
+        #Navigation State for A* travel to each station
+        if state == "NAVIGATION":
+            if need_path:
+                start_rc = world_to_grid(pose[0], pose[1])
+                current_station, path, scores = find_closest_station(GRID, start_rc, remaining_stations)
 
-            closest_station, path, scores = find_closest_station(GRID, start_rc, station_coordinates())
+                print("Station Distance Scores:")
+                for station_id, steps in scores:
+                    print(f"  {station_id}: {steps if steps is not None else 'unreachable'}")
 
-            print("Station scores (steps to reach):")
-            for station_id, steps in scores:
-                print(f"  {station_id}: {steps if steps is not None else 'unreachable'}")
+                need_path = False
+                if current_station is None:
+                    print("No reachable stations left")
+                    state = "DONE"
+                    set_speed(0.0, 0.0)
+                    continue
 
-            if closest_station is None:
-                print("No reachable station found")
-            else:
-                print(f"Moving to closest station: {closest_station['id']}")
+                print(f"Moving to station: {current_station['id']}")
                 waypoints = path_to_waypoints(path)
                 nav_state = {"index": 0, "phase": "ROTATE" if waypoints else "DONE"}
 
-            searched = True
+            drive_step(pose, waypoints, nav_state)
+            if nav_state["phase"] == "DONE":
+                print(f"Arrived at {current_station['id']}, searching")
+                state = "SEARCH"
+                search_state = {"accumulated": 0.0, "prev_yaw": pose[2]}
 
-        drive_step(pose, waypoints, nav_state)
+        #Lucky this is the search state so this is where you would put the object detection in#################################
+        #When it detects the object get it to switch to the 
+        elif state == "SEARCH":
+            if detect_target(camera_bgr()):
+                print(f"Target found at {current_station['id']}")
+                state = "FOUND"
+                set_speed(0.0, 0.0)
+            elif search_step(pose, search_state):
+                print(f"No target at {current_station['id']} station dropped")
+                remaining_stations = [s for s in remaining_stations if s["id"] != current_station["id"]]
+                state = "NAVIGATION"
+                need_path = True
+
+        else:  #FOUND or DONE
+            set_speed(0.0, 0.0)
 
 
 if __name__ == "__main__":
