@@ -16,7 +16,6 @@ from controller import Robot
 
 from project_utils import CONFIG, ROOT, world_to_grid, grid_to_world, station_coordinates, path_to_waypoints
 from Astar_helper import astar
-from safety_helper import is_unsafe, start_recovery, recovery_step
 
 
 # ------------------------------------------------------------------
@@ -78,6 +77,82 @@ def proximity_values():
 def detect_target(frame):
     """Placeholder for real target detection; always reports not-found for now."""
     return False
+
+
+# ------------------------------------------------------------------
+# Safety / interrupt layer
+#
+# e-puck ps0..ps7 layout (standard Webots e-puck, sensors numbered
+# clockwise from the front-right):
+#   ps0 front-right   ps1 right        ps2 right-rear
+#   ps3 rear-right    ps4 rear-left    ps5 left-rear
+#   ps6 left          ps7 front-left
+#
+# ------------------------------------------------------------------
+FRONT_IDX = (0, 1, 6, 7)        # front-right, right, left, front-left
+REAR_IDX = (2, 3, 4, 5)         # right-rear, rear-right, rear-left, left-rear
+RIGHT_IDX = (0, 1, 2)
+LEFT_IDX = (7, 6, 5)
+
+PS_TRIGGER = 85.0                # sensors pickup background noise between 59 to 75
+
+RECOVERY_MOVE_S = 0.5            # seconds spent driving straight clear
+RECOVERY_TURN_S = 0.4            # seconds spent turning clear afterwards
+RECOVERY_TURN_MAX_S = 1.2        # safety valve so TURN can't run forever
+
+
+def is_unsafe(prox):
+    """True if any proximity sensor is inside safety margin."""
+    return any(v > PS_TRIGGER for v in prox)
+
+
+def start_recovery(prox):
+    """Decide which way to escape: straight-line direction away from whichever
+    end (front/rear) triggered, and which way to turn once clear, away from
+    whichever side (left/right) triggered. Without this, an obstacle behind
+    the robot would make it reverse straight into it.
+    """
+    front = max(prox[i] for i in FRONT_IDX)
+    rear = max(prox[i] for i in REAR_IDX)
+    right = max(prox[i] for i in RIGHT_IDX)
+    left = max(prox[i] for i in LEFT_IDX)
+    escape = "BACKUP" if front >= rear else "FORWARD"   # move away from closer end
+    turn_left = right >= left                            # turn away from closer side
+    return {"phase": escape, "timer": 0, "turn_left": turn_left}
+
+
+def recovery_step(rec_state, prox):
+    """One tick of the escape manoeuvre (move clear, then turn away).
+
+    Returns True once the manoeuvre is finished and it is safe to hand
+    control back to the mission state machine.
+    """
+    move_steps = max(1, int(RECOVERY_MOVE_S * 1000 / timestep))
+    turn_steps = max(1, int(RECOVERY_TURN_S * 1000 / timestep))
+    turn_steps_max = max(turn_steps, int(RECOVERY_TURN_MAX_S * 1000 / timestep))
+
+    if rec_state["phase"] in ("BACKUP", "FORWARD"):
+        speed = -MOVE_SPEED if rec_state["phase"] == "BACKUP" else MOVE_SPEED
+        set_speed(speed, speed)
+        rec_state["timer"] += 1
+        if rec_state["timer"] >= move_steps or not is_unsafe(prox):
+            rec_state["phase"] = "TURN"
+            rec_state["timer"] = 0
+        return False
+
+    if rec_state["phase"] == "TURN":
+        if rec_state["turn_left"]:
+            set_speed(-TURN_SPEED, TURN_SPEED)
+        else:
+            set_speed(TURN_SPEED, -TURN_SPEED)
+        rec_state["timer"] += 1
+        if rec_state["timer"] >= turn_steps and not is_unsafe(prox):
+            return True
+        if rec_state["timer"] >= turn_steps_max:   # don't spin forever
+            return True
+        return False
+
+    return True
 
 
 # ------------------------------------------------------------------
@@ -202,30 +277,31 @@ def main():
     nav_state = {"index": 0, "phase": "DONE"}
     search_state = None
 
-    #None when not escaping an obstacle
+    #Interrupt wrapper: while safe -> run mission state machine as
+    #normal; while unsafe (proximity_values() >= PS_TRIGGER) -> suspend
+    #state machine and run escape manoeuvre instead. recovery_state is
+    #None whenever not currently recovering.
     recovery_state = None
 
     while robot.step(timestep) != -1:
         pose = get_pose()
         prox = proximity_values()
 
-        #Safety interrupt, pauses the state machine until escape finishes
-        if recovery_state is not None or is_unsafe(prox):
+        if is_unsafe(prox):
             if recovery_state is None:
                 print(f"!! obstacle inside safety margin (ps={[round(v) for v in prox]}); "
                       f"pausing mission, rerouting")
                 recovery_state = start_recovery(prox)
-            done, left, right = recovery_step(recovery_state, prox, timestep, MOVE_SPEED, TURN_SPEED)
-            set_speed(left, right)
-            if done:
+            if recovery_step(recovery_state, prox):
                 recovery_state = None
-                #Pose changed so replan / reset search heading
+                # pose/heading changed during escape manoeuvre. makes
+                # state machine re-orient itself before it acts again
                 if state == "NAVIGATION":
                     need_path = True
                 elif state == "SEARCH" and search_state is not None:
                     search_state["prev_yaw"] = get_pose()[2]
                 print("Clear again, resuming mission")
-            continue
+            continue   # skip state machine this tick
 
         #Navigation State for A* travel to each station
         if state == "NAVIGATION":
