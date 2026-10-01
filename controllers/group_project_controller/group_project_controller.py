@@ -17,6 +17,7 @@ from controller import Robot
 from project_utils import CONFIG, ROOT, world_to_grid, grid_to_world, station_coordinates, path_to_waypoints
 from Astar_helper import astar
 from safety_helper import is_unsafe, start_recovery, recovery_step
+from vision_helper import load_target_image, find_features, detect_target
 
 
 # ------------------------------------------------------------------
@@ -73,11 +74,6 @@ def camera_bgr():
 
 def proximity_values():
     return [sensor.getValue() for sensor in ps]
-
-
-def detect_target(frame):
-    """Placeholder for real target detection; always reports not-found for now."""
-    return False
 
 
 # ------------------------------------------------------------------
@@ -189,6 +185,12 @@ def main():
     print("Stations:", [s["id"] for s in CONFIG["stations"]])
     print("Camera:", camera.getWidth(), "x", camera.getHeight())
 
+    #Load the target reference features once
+    reference = load_target_image(target)
+    print("Target reference:", reference.shape)
+    reference_keypoints, reference_descriptors = find_features(reference)
+    print("Reference keypoints:", len(reference_keypoints))
+    print("Descriptor shape:", reference_descriptors.shape)
 
     #State machine:
     #NAVIGATION Drive to closest Station
@@ -257,7 +259,7 @@ def main():
         #Lucky this is the search state so this is where you would put the object detection in#################################
         #When it detects the object get it to switch to the 
         elif state == "SEARCH":
-            if detect_target(camera_bgr()):
+            if detect_target(camera_bgr(), reference_descriptors):
                 print(f"Target found at {current_station['id']}")
                 state = "FOUND"
                 set_speed(0.0, 0.0)
