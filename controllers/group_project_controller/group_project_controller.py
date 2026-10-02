@@ -276,7 +276,7 @@ def main():
         elif state == "SEARCH":
             #Only check the camera while facing the station, not while turning
             holding = search_state["phase"] == "HOLD"
-            if holding and detector.update(camera_bgr(), reference_descriptors):
+            if holding and detector.update(camera_bgr()):
                 print(f"Target found at {current_station['id']}")
                 state = "FOUND"
                 set_speed(0.0, 0.0)
