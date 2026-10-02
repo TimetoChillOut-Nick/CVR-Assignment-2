@@ -17,7 +17,7 @@ from controller import Robot
 from project_utils import CONFIG, ROOT, world_to_grid, grid_to_world, station_coordinates, path_to_waypoints
 from Astar_helper import astar
 from safety_helper import is_unsafe, start_recovery, recovery_step
-from vision_helper import build_references, score_frame_all, target_vs_others, StationJudge
+from vision_helper import load_target_image, find_features, detect_target
 
 
 # ------------------------------------------------------------------
@@ -161,35 +161,19 @@ def drive_step(pose, waypoints, nav_state):
             set_speed(MOVE_SPEED, MOVE_SPEED)
 
 
-#Seconds spent looking at each station
-SEARCH_HOLD_S = 5.0
-
-
-def new_search_state(station):
-    return {"phase": "TURN", "yaw": station["yaw"], "timer": 0}
-
-
-#Turn to face the station then hold still, returns True once the hold time is up
 def search_step(pose, search_state):
-    if search_state["phase"] == "TURN":
-        error = math.remainder(search_state["yaw"] - pose[2], 2 * math.pi)
+    """Spin in place scanning for the target. Returns True once a full revolution completes."""
+    yaw = pose[2]
+    delta = math.remainder(yaw - search_state["prev_yaw"], 2 * math.pi)
+    search_state["accumulated"] += abs(delta)
+    search_state["prev_yaw"] = yaw
 
-        if "turn_left" not in search_state:
-            search_state["turn_left"] = error > 0
+    if search_state["accumulated"] >= 2 * math.pi:
+        set_speed(0.0, 0.0)
+        return True
 
-        arrived = error <= 0 if search_state["turn_left"] else error >= 0
-        if arrived:
-            search_state["phase"] = "HOLD"
-            set_speed(0.0, 0.0)
-        elif search_state["turn_left"]:
-            set_speed(-TURN_SPEED, TURN_SPEED)
-        else:
-            set_speed(TURN_SPEED, -TURN_SPEED)
-        return False
-
-    set_speed(0.0, 0.0)
-    search_state["timer"] += 1
-    return search_state["timer"] >= int(SEARCH_HOLD_S * 1000 / timestep)
+    set_speed(-TURN_SPEED, TURN_SPEED)
+    return False
 
 
 # ------------------------------------------------------------------
@@ -202,10 +186,12 @@ def main():
     print("Stations:", [s["id"] for s in CONFIG["stations"]])
     print("Camera:", camera.getWidth(), "x", camera.getHeight())
 
-    #Load reference features for every target once
-    references = build_references()
-    print("References loaded:", len(references))
-    judge = StationJudge()
+    #Load the target reference features once
+    reference = load_target_image(target)
+    print("Target reference:", reference.shape)
+    reference_keypoints, reference_descriptors = find_features(reference)
+    print("Reference keypoints:", len(reference_keypoints))
+    print("Descriptor shape:", reference_descriptors.shape)
 
     #State machine:
     #NAVIGATION Drive to closest Station
@@ -236,12 +222,11 @@ def main():
             set_speed(left, right)
             if done:
                 recovery_state = None
-                #Pose changed so replan / turn back to the station
+                #Pose changed so replan / reset search heading
                 if state == "NAVIGATION":
                     need_path = True
-                elif state == "SEARCH":
-                    search_state = new_search_state(current_station)
-                    judge.reset()
+                elif state == "SEARCH" and search_state is not None:
+                    search_state["prev_yaw"] = get_pose()[2]
                 print("Clear again, resuming mission")
             continue
 
@@ -270,26 +255,17 @@ def main():
             if nav_state["phase"] == "DONE":
                 print(f"Arrived at {current_station['id']}, searching")
                 state = "SEARCH"
-                search_state = new_search_state(current_station)
-                judge.reset()
+                search_state = {"accumulated": 0.0, "prev_yaw": pose[2]}
 
         #Lucky this is the search state so this is where you would put the object detection in#################################
         #When it detects the object get it to switch to the 
         elif state == "SEARCH":
-            #Only check the camera while facing the station, not while turning
-            holding = search_state["phase"] == "HOLD"
-            if holding:
-                scores = score_frame_all(camera_bgr(), references)
-                target_score, other_score, _ = target_vs_others(scores, target)
-                judge.add(target_score, other_score)
-
-            #Confirm as soon as enough frames agree, only drop after the full hold
-            if holding and judge.ready() and judge.is_target():
-                print(f"Target found at {current_station['id']} (target, other) = {judge.evidence()}")
+            if detect_target(camera_bgr(), reference_descriptors):
+                print(f"Target found at {current_station['id']}")
                 state = "FOUND"
                 set_speed(0.0, 0.0)
             elif search_step(pose, search_state):
-                print(f"No target at {current_station['id']} (target, other) = {judge.evidence()}, station dropped")
+                print(f"No target at {current_station['id']} station dropped")
                 remaining_stations = [s for s in remaining_stations if s["id"] != current_station["id"]]
                 state = "NAVIGATION"
                 need_path = True

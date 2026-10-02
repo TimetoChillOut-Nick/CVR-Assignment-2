@@ -40,7 +40,7 @@ def station_coordinates():
     for s in CONFIG["stations"]:
         x, y = s["observe"]
         row, col = world_to_grid(x, y)
-        coords.append({"id": s["id"], "world": (x, y), "grid": (row, col), "yaw": s["observe_yaw"]})
+        coords.append({"id": s["id"], "world": (x, y), "grid": (row, col)})
     return coords
 
 
