@@ -17,7 +17,7 @@ from controller import Robot
 from project_utils import CONFIG, ROOT, world_to_grid, grid_to_world, station_coordinates, path_to_waypoints
 from Astar_helper import astar
 from safety_helper import is_unsafe, start_recovery, recovery_step
-from vision_helper import load_target_image, find_features, detect_target
+from vision_helper import TargetDetector
 
 
 # ------------------------------------------------------------------
@@ -202,12 +202,8 @@ def main():
     print("Stations:", [s["id"] for s in CONFIG["stations"]])
     print("Camera:", camera.getWidth(), "x", camera.getHeight())
 
-    #Load the target reference features once
-    reference = load_target_image(target)
-    print("Target reference:", reference.shape)
-    reference_keypoints, reference_descriptors = find_features(reference)
-    print("Reference keypoints:", len(reference_keypoints))
-    print("Descriptor shape:", reference_descriptors.shape)
+    #Load the target 
+    detector = TargetDetector(target)
 
     #State machine:
     #NAVIGATION Drive to closest Station
@@ -243,6 +239,7 @@ def main():
                     need_path = True
                 elif state == "SEARCH":
                     search_state = new_search_state(current_station)
+                    detector.reset()
                 print("Clear again, resuming mission")
             continue
 
@@ -272,13 +269,14 @@ def main():
                 print(f"Arrived at {current_station['id']}, searching")
                 state = "SEARCH"
                 search_state = new_search_state(current_station)
+                detector.reset()
 
         #Lucky this is the search state so this is where you would put the object detection in#################################
         #When it detects the object get it to switch to the 
         elif state == "SEARCH":
             #Only check the camera while facing the station, not while turning
             holding = search_state["phase"] == "HOLD"
-            if holding and detect_target(camera_bgr(), reference_descriptors):
+            if holding and detector.update(camera_bgr(), reference_descriptors):
                 print(f"Target found at {current_station['id']}")
                 state = "FOUND"
                 set_speed(0.0, 0.0)
