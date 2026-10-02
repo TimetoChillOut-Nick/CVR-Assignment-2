@@ -52,3 +52,11 @@ last_cleared = current_station["id"]
 - **Actual:** `MOVE_SPEED` was 5.0 rad/s, while the e-puck max is 6.28. `MAX_SPEED` was 10, above the motor limit, so the clip in `set_speed` never did anything.
 - **Attempted:** `MAX_SPEED = 6.28` to match the motor, `MOVE_SPEED = 6.0`. `TURN_SPEED` left at 4.0 to avoid overshooting turns.
 - **Result:** 3:43, down from 3:50 (about 3%). Kept. Straight-line driving is not where most of the time goes.
+
+## 4. 360° search spin can match the wrong station
+**File:** `group_project_controller.py` (`search_step`, SEARCH state), `project_utils.py` (`station_coordinates`)
+
+- **Expected:** A match during SEARCH means the target is at the station being checked.
+- **Actual:** The robot spun a full 360° at each station, so the camera also saw neighbouring stations and the B1–B5 distractors. A match mid-spin could come from a different station, and the robot would stop at the wrong one.
+- **Solved:** The robot turns to the station's `observe_yaw` from the config, then holds still for 5 s (`SEARCH_HOLD_S`). The camera is only checked during the hold. After an obstacle escape mid-search, it turns back to the station and restarts the hold.
+- **Result:** Works in Webots. Full tour down to 3:34 from 3:43.
