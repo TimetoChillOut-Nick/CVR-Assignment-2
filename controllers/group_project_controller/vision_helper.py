@@ -164,3 +164,26 @@ class StationJudge:
     def reset(self):
         self.target_scores, self.other_scores = [], []
 
+from collections import deque
+
+FRAMES_WINDOW = 7       #look at the last 7 frames
+FRAMES_NEEDED = 3       #this many must individually look like the target
+
+
+class TargetDetector:
+    #main controller only calls update(frame)and reset()
+
+    def __init__(self, target_name):
+        self.target = target_name
+        self.references = build_references()
+        self.recent = deque(maxlen=FRAMES_WINDOW)
+
+    def reset(self):
+        self.recent.clear()
+
+    def update(self, frame):
+        #Score one frame. Returns True once the target is confidently seen
+        scores = score_frame_all(frame, self.references)
+        t, o, _ = target_vs_others(scores, self.target)
+        self.recent.append(t >= MIN_INLIERS and t >= MIN_MARGIN * max(o, 1.0))
+        return sum(self.recent) >= FRAMES_NEEDED
