@@ -3,13 +3,10 @@ Target detection using ORB feature matching between the target
 reference image and the robot camera frame.
 """
 
-import json
-import math
-from pathlib import Path
 
+from pathlib
 import cv2
 import numpy as np
-from controller import Robot
 
 from project_utils import CONFIG, ROOT, world_to_grid, grid_to_world
 
