@@ -6,3 +6,49 @@
 - **Expected:** When an obstacle triggers recovery, the robot backs up (or drives forward) then turns away before resuming the mission.
 - **Actual:** Recovery only ran while a sensor read above `PS_TRIGGER`. Once the robot backed up enough for the reading to drop, it skipped the turn and went straight back to the missionhitting the same obstacle.
 - **Solved:** Changed the wrapper condition to `if recovery_state is not None or is_unsafe(prox):` so a started manoeuvre always runs to completion and resets `recovery_state` to `None`.
+
+## 2. Station order does two laps of the arena (attempted improvement)
+**File:** `group_project_controller.py` (NAVIGATION planning), `project_utils.py` (`QUADRANT_PAIRS`)
+
+- **Expected:** The bot visits stations in an efficient order.
+- **Actual:** Always picking the closest station meant it did a lap of the interior stations, then a lap of the boundary stations. A full run took 3:50.
+- **Attempted:** Stations are paired by quadrant (S1/S2, S3/S4, S5/S6, S7/S8). After clearing a station the bot goes to its partner next, then uses A* to pick the closest station to start the next quadrant.
+- **Result:** 4:12, slower than the 3:50 baseline. Rolled back to closest-first.
+
+Code that was tried:
+
+```python
+#project_utils.py
+#Stations paired by quadrant so the bot clears one quadrant before moving on
+QUADRANT_PAIRS = {
+    "S1": "S2", "S2": "S1",
+    "S3": "S4", "S4": "S3",
+    "S5": "S6", "S6": "S5",
+    "S7": "S8", "S8": "S7",
+}
+```
+
+```python
+#group_project_controller.py, NAVIGATION planning
+#Go to the quadrant partner of the last cleared station first
+partner = QUADRANT_PAIRS.get(last_cleared)
+quadrant = [s for s in remaining_stations if s["id"] == partner]
+current_station, path, scores = find_closest_station(GRID, start_rc, quadrant)
+
+#Quadrant done or partner unreachable, fall back to closest station
+if current_station is None:
+    current_station, path, scores = find_closest_station(GRID, start_rc, remaining_stations)
+```
+
+```python
+#group_project_controller.py, SEARCH when a station is dropped
+last_cleared = current_station["id"]
+```
+
+## 3. Drive speed below what the e-puck can do (attempted improvement)
+**File:** `group_project_controller.py` (`MAX_SPEED`, `MOVE_SPEED`)
+
+- **Expected:** The bot drives straight sections close to its top speed.
+- **Actual:** `MOVE_SPEED` was 5.0 rad/s, while the e-puck max is 6.28. `MAX_SPEED` was 10, above the motor limit, so the clip in `set_speed` never did anything.
+- **Attempted:** `MAX_SPEED = 6.28` to match the motor, `MOVE_SPEED = 6.0`. `TURN_SPEED` left at 4.0 to avoid overshooting turns.
+- **Result:** 3:43, down from 3:50 (about 3%). Kept. Straight-line driving is not where most of the time goes.

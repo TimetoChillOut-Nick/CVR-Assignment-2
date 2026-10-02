@@ -44,7 +44,8 @@ imu.enable(timestep)
 for sensor in ps:
     sensor.enable(timestep)
 
-MAX_SPEED = 10
+#e-puck wheel motor max velocity (rad/s)
+MAX_SPEED = 6.28
 GRID = np.load(ROOT / "maps" / "occupancy_grid.npy")
 MISSION = json.loads((ROOT / "config" / "assessment_mission.json").read_text())
 target = MISSION["target"]
@@ -98,7 +99,7 @@ def find_closest_station(grid, start_rc, stations):
 
 
 #Default movement setup ## tune this
-MOVE_SPEED = 5.0 #Straightline Speed
+MOVE_SPEED = 6.0 #Straightline Speed
 TURN_SPEED = 4.0 #Turn Speed
 BUCKET_ANGLE = (0.0, math.pi / 2, math.pi, -math.pi / 2)  #east, north, west, south
 
