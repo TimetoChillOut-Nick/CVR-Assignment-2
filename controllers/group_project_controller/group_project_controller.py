@@ -161,19 +161,35 @@ def drive_step(pose, waypoints, nav_state):
             set_speed(MOVE_SPEED, MOVE_SPEED)
 
 
+#Seconds spent looking at each station
+SEARCH_HOLD_S = 5.0
+
+
+def new_search_state(station):
+    return {"phase": "TURN", "yaw": station["yaw"], "timer": 0}
+
+
+#Turn to face the station then hold still, returns True once the hold time is up
 def search_step(pose, search_state):
-    """Spin in place scanning for the target. Returns True once a full revolution completes."""
-    yaw = pose[2]
-    delta = math.remainder(yaw - search_state["prev_yaw"], 2 * math.pi)
-    search_state["accumulated"] += abs(delta)
-    search_state["prev_yaw"] = yaw
+    if search_state["phase"] == "TURN":
+        error = math.remainder(search_state["yaw"] - pose[2], 2 * math.pi)
 
-    if search_state["accumulated"] >= 2 * math.pi:
-        set_speed(0.0, 0.0)
-        return True
+        if "turn_left" not in search_state:
+            search_state["turn_left"] = error > 0
 
-    set_speed(-TURN_SPEED, TURN_SPEED)
-    return False
+        arrived = error <= 0 if search_state["turn_left"] else error >= 0
+        if arrived:
+            search_state["phase"] = "HOLD"
+            set_speed(0.0, 0.0)
+        elif search_state["turn_left"]:
+            set_speed(-TURN_SPEED, TURN_SPEED)
+        else:
+            set_speed(TURN_SPEED, -TURN_SPEED)
+        return False
+
+    set_speed(0.0, 0.0)
+    search_state["timer"] += 1
+    return search_state["timer"] >= int(SEARCH_HOLD_S * 1000 / timestep)
 
 
 # ------------------------------------------------------------------
@@ -222,11 +238,11 @@ def main():
             set_speed(left, right)
             if done:
                 recovery_state = None
-                #Pose changed so replan / reset search heading
+                #Pose changed so replan / turn back to the station
                 if state == "NAVIGATION":
                     need_path = True
-                elif state == "SEARCH" and search_state is not None:
-                    search_state["prev_yaw"] = get_pose()[2]
+                elif state == "SEARCH":
+                    search_state = new_search_state(current_station)
                 print("Clear again, resuming mission")
             continue
 
@@ -255,12 +271,14 @@ def main():
             if nav_state["phase"] == "DONE":
                 print(f"Arrived at {current_station['id']}, searching")
                 state = "SEARCH"
-                search_state = {"accumulated": 0.0, "prev_yaw": pose[2]}
+                search_state = new_search_state(current_station)
 
         #Lucky this is the search state so this is where you would put the object detection in#################################
         #When it detects the object get it to switch to the 
         elif state == "SEARCH":
-            if detect_target(camera_bgr(), reference_descriptors):
+            #Only check the camera while facing the station, not while turning
+            holding = search_state["phase"] == "HOLD"
+            if holding and detect_target(camera_bgr(), reference_descriptors):
                 print(f"Target found at {current_station['id']}")
                 state = "FOUND"
                 set_speed(0.0, 0.0)
