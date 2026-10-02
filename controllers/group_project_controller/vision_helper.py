@@ -4,11 +4,10 @@ reference image and the robot camera frame.
 """
 
 
-from pathlib
+from collections import deque
 import cv2
 import numpy as np
-
-from project_utils import CONFIG, ROOT, world_to_grid, grid_to_world
+from project_utils import CONFIG, ROOT
 
 
 CROP_FRACTION = 0.60        #keep the upper part of the image where the poster appears
