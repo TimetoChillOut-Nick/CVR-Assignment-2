@@ -16,6 +16,7 @@ from controller import Robot
 
 from project_utils import CONFIG, ROOT, world_to_grid, grid_to_world, station_coordinates, path_to_waypoints
 from Astar_helper import astar
+from smoothing_helper import smooth_waypoints
 from safety_helper import is_unsafe, start_recovery, recovery_step
 from vision_helper import TargetDetector, MIN_INLIERS
 
@@ -101,20 +102,20 @@ def find_closest_station(grid, start_rc, stations):
 #Default movement setup ## tune this
 MOVE_SPEED = 6.0 #Straightline Speed
 TURN_SPEED = 4.0 #Turn Speed
-BUCKET_ANGLE = (0.0, math.pi / 2, math.pi, -math.pi / 2)  #east, north, west, south
+
+#Smooth the A* path, False uses the A* turning points
+SMOOTH_PATHS = True
+
+#Heading error (rad) to turn on the spot, and to drive again
+ROTATE_ERROR = 0.5
+ALIGNED_ERROR = 0.1
+#Steering strength while driving
+STEER_GAIN = 4.0
+#Distance (m) that counts as reaching a waypoint
+WAYPOINT_TOL = 0.05
 
 
-def heading_bucket(yaw):
-    return round(yaw / (math.pi / 2)) % 4
-
-
-def target_bucket(dx, dy):
-    if abs(dx) >= abs(dy):
-        return 0 if dx > 0 else 2 #east or west
-    else:
-        return 1 if dy > 0 else 3 #north or south
-
-
+#Turn on the spot if well off course, otherwise steer while driving
 def drive_step(pose, waypoints, nav_state):
     if nav_state["phase"] == "DONE" or nav_state["index"] >= len(waypoints):
         nav_state["phase"] = "DONE"
@@ -125,43 +126,29 @@ def drive_step(pose, waypoints, nav_state):
     tx, ty = waypoints[nav_state["index"]]
     dx, dy = tx - x, ty - y
 
-    if nav_state["phase"] == "ROTATE":
-        target_angle = BUCKET_ANGLE[target_bucket(dx, dy)]
-        error = math.remainder(target_angle - yaw, 2 * math.pi) 
-
-        if "turn_left" not in nav_state:
-            nav_state["turn_left"] = error > 0
-
-        arrived = error <= 0 if nav_state["turn_left"] else error >= 0
-        if arrived:
-            nav_state.pop("turn_left", None)
-            nav_state["phase"] = "DRIVE"
-        elif nav_state["turn_left"]:
-            set_speed(-TURN_SPEED, TURN_SPEED)
-        else:
-            set_speed(TURN_SPEED, -TURN_SPEED)
-
-    elif nav_state["phase"] == "DRIVE":
-        #Check Snap to cardinal direction
-        heading = heading_bucket(yaw)
-        if heading == 0:
-            arrived = x >= tx #east
-        elif heading == 1:
-            arrived = y >= ty #north
-        elif heading == 2:
-            arrived = x <= tx #west
-        else:
-            arrived = y <= ty #south
-
-        if arrived:
-            nav_state["index"] += 1
-            nav_state["phase"] = "ROTATE" if nav_state["index"] < len(waypoints) else "DONE"
+    if math.hypot(dx, dy) < WAYPOINT_TOL:
+        nav_state["index"] += 1
+        if nav_state["index"] >= len(waypoints):
+            nav_state["phase"] = "DONE"
             set_speed(0.0, 0.0)
-        else:
-            set_speed(MOVE_SPEED, MOVE_SPEED)
+        return
+
+    error = math.remainder(math.atan2(dy, dx) - yaw, 2 * math.pi)
+
+    if nav_state["phase"] == "ROTATE" and abs(error) < ALIGNED_ERROR:
+        nav_state["phase"] = "DRIVE"
+    elif nav_state["phase"] == "DRIVE" and abs(error) > ROTATE_ERROR:
+        nav_state["phase"] = "ROTATE"
+
+    if nav_state["phase"] == "ROTATE":
+        turn = TURN_SPEED if error > 0 else -TURN_SPEED
+        set_speed(-turn, turn)
+    else:
+        steer = STEER_GAIN * error
+        set_speed(MOVE_SPEED - steer, MOVE_SPEED + steer)
 
 
-#Reverse slowly away from the station so more of the poster fits in view
+#Back away slowly so more of the poster fits in view
 SEARCH_BACKUP_SPEED = 2.0
 SEARCH_BACKUP_M = 0.30
 
@@ -170,7 +157,7 @@ def new_search_state(station):
     return {"phase": "TURN", "yaw": station["yaw"], "start": None}
 
 
-#Turn to face the station then back away slowly, returns True once the full distance is covered
+#Face the station then back away, True once backed up the full distance
 def search_step(pose, search_state):
     if search_state["phase"] == "DONE":
         set_speed(0.0, 0.0)
@@ -274,7 +261,7 @@ def main():
                     continue
 
                 print(f"Moving to station: {current_station['id']}")
-                waypoints = path_to_waypoints(path)
+                waypoints = smooth_waypoints(GRID, path) if SMOOTH_PATHS else path_to_waypoints(path)
                 nav_state = {"index": 0, "phase": "ROTATE" if waypoints else "DONE"}
 
             drive_step(pose, waypoints, nav_state)
@@ -287,7 +274,7 @@ def main():
         #Lucky this is the search state so this is where you would put the object detection in#################################
         #When it detects the object get it to switch to the 
         elif state == "SEARCH":
-            #Only check the camera while backing away from the station, not while turning
+            #Only scan while backing away, not while turning
             scanning = search_state["phase"] == "BACKUP"
             found = scanning and detector.update(camera_bgr())
             best = (f"best target score {detector.best_target} (need {MIN_INLIERS}), "

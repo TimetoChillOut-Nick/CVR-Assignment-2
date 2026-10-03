@@ -180,7 +180,7 @@ class TargetDetector:
 
     def reset(self):
         self.recent.clear()
-        #Highest scores seen since the last reset, for tuning
+        #Best scores since the last reset, for tuning
         self.best_target = 0
         self.best_other = 0
         self.best_other_name = None
