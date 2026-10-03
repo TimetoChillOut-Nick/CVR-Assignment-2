@@ -176,13 +176,22 @@ class TargetDetector:
         self.target = target_name
         self.references = build_references()
         self.recent = deque(maxlen=FRAMES_WINDOW)
+        self.reset()
 
     def reset(self):
         self.recent.clear()
+        #Highest scores seen since the last reset, for tuning
+        self.best_target = 0
+        self.best_other = 0
+        self.best_other_name = None
 
     def update(self, frame):
         #Score one frame. Returns True once the target is confidently seen
         scores = score_frame_all(frame, self.references)
-        t, o, _ = target_vs_others(scores, self.target)
+        t, o, other_key = target_vs_others(scores, self.target)
+        self.best_target = max(self.best_target, t)
+        if o > self.best_other:
+            self.best_other = o
+            self.best_other_name = other_key[1]
         self.recent.append(t >= MIN_INLIERS and t >= MIN_MARGIN * max(o, 1.0))
         return sum(self.recent) >= FRAMES_NEEDED
