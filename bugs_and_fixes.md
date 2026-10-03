@@ -60,3 +60,11 @@ last_cleared = current_station["id"]
 - **Actual:** The robot spun a full 360° at each station, so the camera also saw neighbouring stations and the B1–B5 distractors. A match mid-spin could come from a different station, and the robot would stop at the wrong one.
 - **Solved:** The robot turns to the station's `observe_yaw` from the config, then holds still for 5 s (`SEARCH_HOLD_S`). The camera is only checked during the hold. After an obstacle escape mid-search, it turns back to the station and restarts the hold.
 - **Result:** Works in Webots. Full tour down to 3:34 from 3:43.
+
+## 5. Target not detected from the observe point (attempted fix)
+**File:** `group_project_controller.py` (`search_step`, SEARCH state), `vision_helper.py` (`TargetDetector`)
+
+- **Expected:** The robot detects the target poster while facing its station.
+- **Actual:** No detection. Estimated cause: the poster spans about 0.035–0.255 m height, and from the observe point (about 0.29 m away) the camera, about 3 cm off the ground, likely only sees the bottom ~40% of it.
+- **Attempted:** After turning to `observe_yaw`, the robot reverses slowly (`SEARCH_BACKUP_SPEED = 2.0`) for up to `SEARCH_BACKUP_M = 0.30` m while scoring every frame. A match marks the station FOUND; otherwise the station is dropped. If an obstacle behind interrupts the backup, the station is finished. `TargetDetector` now tracks the best target and other scores, printed at the end of each station search.
+- **Result:** To be tested. A FOUND stop can now be up to 0.30 m from the observe point, outside the 0.20 m finish rule. Needs a drive back to the observe point later.
