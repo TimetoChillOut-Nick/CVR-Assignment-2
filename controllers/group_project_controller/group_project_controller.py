@@ -232,6 +232,7 @@ def main():
                 print(f"!! obstacle inside safety margin (ps={[round(v) for v in prox]}); "
                       f"pausing mission, rerouting")
                 recovery_state = start_recovery(prox)
+                run_log["escapes"] += 1
             done, left, right = recovery_step(recovery_state, prox, timestep, MOVE_SPEED, TURN_SPEED)
             set_speed(left, right)
             if done:
