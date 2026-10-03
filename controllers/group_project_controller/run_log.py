@@ -6,7 +6,7 @@ POSITION_TOLERANCE_M = 0.20
 
 
 def new_run_log():
-    return {"travel": 0.0, "search": 0.0, "stations": [], "final_error": None, "printed": False}
+    return {"travel": 0.0, "search": 0.0, "stations": [], "escapes": 0, "final_error": None, "printed": False}
 
 
 #Add one tick of time to travelling or searching
@@ -48,6 +48,7 @@ def print_summary(run_log, total_time):
     print(f"  Total time:     {format_time(total_time)} (limit 4:00)")
     print(f"  Time travelled: {format_time(run_log['travel'])}")
     print(f"  Time searched:  {format_time(run_log['search'])}")
+    print(f"  Safety escapes: {run_log['escapes']}")
     if error is not None:
         print(f"  Final distance: {error:.3f} m (limit {POSITION_TOLERANCE_M} m)")
     print(f"  Stations visited ({len(run_log['stations'])}):")
