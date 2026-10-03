@@ -68,3 +68,19 @@ last_cleared = current_station["id"]
 - **Actual:** No detection. Estimated cause: the poster spans about 0.035–0.255 m height, and from the observe point (about 0.29 m away) the camera, about 3 cm off the ground, likely only sees the bottom ~40% of it.
 - **Attempted:** After turning to `observe_yaw`, the robot reverses slowly (`SEARCH_BACKUP_SPEED = 2.0`) for up to `SEARCH_BACKUP_M = 0.30` m while scoring every frame. A match marks the station FOUND; otherwise the station is dropped. If an obstacle behind interrupts the backup, the station is finished. `TargetDetector` now tracks the best target and other scores, printed at the end of each station search.
 - **Result:** To be tested. A FOUND stop can now be up to 0.30 m from the observe point, outside the 0.20 m finish rule. Needs a drive back to the observe point later.
+
+## 6. Staircase paths waste time on stops and turns (attempted improvement)
+**File:** `smoothing_helper.py`, `group_project_controller.py` (`drive_step`)
+
+- **Expected:** The bot drives direct routes between stations.
+- **Actual:** A* paths were staircases, and the bot stopped to turn 90° at every corner.
+- **Attempted:** Smoothed paths into straight lines that keep 0.045 m from obstacles, and a new `drive_step` that steers at any angle. Offline: 11% shorter paths, 58% less turning. `SMOOTH_PATHS = False` turns it off for comparison.
+- **Result:** works resolve time is now 2:28
+
+## 7. Bot stops outside the 0.20 m finish zone after a match
+**File:** `group_project_controller.py` (RETURN state, safety interrupt)
+
+- **Expected:** After finding the target, the bot finishes within 0.20 m of the station's observe point.
+- **Actual:** The bot stopped wherever the match happened during the back-up, up to 0.30 m away. The safety escape could also move it after stopping.
+- **Solved:** A new RETURN state drives back to the observe point before stopping, and prints the final distance. The safety escape is skipped once FOUND or DONE.
+- **Result:** Works in Webots, final stop 0.023 m from the observe point.

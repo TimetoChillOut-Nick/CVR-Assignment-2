@@ -19,6 +19,7 @@ from Astar_helper import astar
 from smoothing_helper import smooth_waypoints
 from safety_helper import is_unsafe, start_recovery, recovery_step
 from vision_helper import TargetDetector, MIN_INLIERS
+from run_log import new_run_log, add_time, add_station, print_summary
 
 
 # ------------------------------------------------------------------
@@ -216,13 +217,17 @@ def main():
 
     #None when not escaping an obstacle
     recovery_state = None
+    run_log = new_run_log()
 
     while robot.step(timestep) != -1:
         pose = get_pose()
         prox = proximity_values()
+        add_time(run_log, state, timestep / 1000)
 
         #Safety interrupt, pauses the state machine until escape finishes
-        if recovery_state is not None or is_unsafe(prox):
+        #Skipped once stopped so the bot stays on its final spot
+        stopped = state in ("FOUND", "DONE")
+        if not stopped and (recovery_state is not None or is_unsafe(prox)):
             if recovery_state is None:
                 print(f"!! obstacle inside safety margin (ps={[round(v) for v in prox]}); "
                       f"pausing mission, rerouting")
@@ -240,6 +245,8 @@ def main():
                 elif state == "SEARCH":
                     search_state = new_search_state(current_station)
                     detector.reset()
+                elif state == "RETURN":
+                    nav_state = {"index": 0, "phase": "ROTATE"}
                 print("Clear again, resuming mission")
             continue
 
@@ -279,18 +286,36 @@ def main():
             found = scanning and detector.update(camera_bgr())
             best = (f"best target score {detector.best_target} (need {MIN_INLIERS}), "
                     f"best other {detector.best_other} ({detector.best_other_name})")
+            #Station search ends on a match or once fully backed up
+            finished = found or search_step(pose, search_state)
+            if finished:
+                add_station(run_log, current_station["id"], detector.best_target,
+                            detector.best_other, detector.best_other_name, found)
+
             if found:
-                print(f"Target found at {current_station['id']}, {best}")
-                state = "FOUND"
-                set_speed(0.0, 0.0)
-            elif search_step(pose, search_state):
+                print(f"Target found at {current_station['id']}, {best}, returning to observe point")
+                state = "RETURN"
+                waypoints = [current_station["world"]]
+                nav_state = {"index": 0, "phase": "ROTATE"}
+            elif finished:
                 print(f"No target at {current_station['id']}, {best}, station dropped")
                 remaining_stations = [s for s in remaining_stations if s["id"] != current_station["id"]]
                 state = "NAVIGATION"
                 need_path = True
 
+        #Return state, drive back to the observe point after a match
+        elif state == "RETURN":
+            drive_step(pose, waypoints, nav_state)
+            if nav_state["phase"] == "DONE":
+                ox, oy = current_station["world"]
+                error = math.hypot(pose[0] - ox, pose[1] - oy)
+                print(f"Stopped at {current_station['id']}, {error:.3f} m from the observe point")
+                run_log["final_error"] = error
+                state = "FOUND"
+
         else:  #FOUND or DONE
             set_speed(0.0, 0.0)
+            print_summary(run_log, robot.getTime())
 
 
 if __name__ == "__main__":
