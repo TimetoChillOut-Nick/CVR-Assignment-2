@@ -17,7 +17,7 @@ from controller import Robot
 from project_utils import CONFIG, ROOT, world_to_grid, grid_to_world, station_coordinates, path_to_waypoints
 from Astar_helper import astar
 from safety_helper import is_unsafe, start_recovery, recovery_step
-from vision_helper import TargetDetector
+from vision_helper import TargetDetector, MIN_INLIERS
 
 
 # ------------------------------------------------------------------
@@ -44,7 +44,7 @@ imu.enable(timestep)
 for sensor in ps:
     sensor.enable(timestep)
 
-#e-puck wheel motor max velocity (rad/s)
+#puck wheel motor max velocity (rad/s)
 MAX_SPEED = 6.28
 GRID = np.load(ROOT / "maps" / "occupancy_grid.npy")
 MISSION = json.loads((ROOT / "config" / "assessment_mission.json").read_text())
@@ -161,16 +161,21 @@ def drive_step(pose, waypoints, nav_state):
             set_speed(MOVE_SPEED, MOVE_SPEED)
 
 
-#Seconds spent looking at each station
-SEARCH_HOLD_S = 5.0
+#Reverse slowly away from the station so more of the poster fits in view
+SEARCH_BACKUP_SPEED = 2.0
+SEARCH_BACKUP_M = 0.30
 
 
 def new_search_state(station):
-    return {"phase": "TURN", "yaw": station["yaw"], "timer": 0}
+    return {"phase": "TURN", "yaw": station["yaw"], "start": None}
 
 
-#Turn to face the station then hold still, returns True once the hold time is up
+#Turn to face the station then back away slowly, returns True once the full distance is covered
 def search_step(pose, search_state):
+    if search_state["phase"] == "DONE":
+        set_speed(0.0, 0.0)
+        return True
+
     if search_state["phase"] == "TURN":
         error = math.remainder(search_state["yaw"] - pose[2], 2 * math.pi)
 
@@ -179,7 +184,8 @@ def search_step(pose, search_state):
 
         arrived = error <= 0 if search_state["turn_left"] else error >= 0
         if arrived:
-            search_state["phase"] = "HOLD"
+            search_state["phase"] = "BACKUP"
+            search_state["start"] = (pose[0], pose[1])
             set_speed(0.0, 0.0)
         elif search_state["turn_left"]:
             set_speed(-TURN_SPEED, TURN_SPEED)
@@ -187,9 +193,13 @@ def search_step(pose, search_state):
             set_speed(TURN_SPEED, -TURN_SPEED)
         return False
 
-    set_speed(0.0, 0.0)
-    search_state["timer"] += 1
-    return search_state["timer"] >= int(SEARCH_HOLD_S * 1000 / timestep)
+    sx, sy = search_state["start"]
+    if math.hypot(pose[0] - sx, pose[1] - sy) >= SEARCH_BACKUP_M:
+        set_speed(0.0, 0.0)
+        return True
+
+    set_speed(-SEARCH_BACKUP_SPEED, -SEARCH_BACKUP_SPEED)
+    return False
 
 
 # ------------------------------------------------------------------
@@ -237,6 +247,9 @@ def main():
                 #Pose changed so replan / turn back to the station
                 if state == "NAVIGATION":
                     need_path = True
+                elif state == "SEARCH" and search_state["phase"] == "BACKUP":
+                    #Something behind stopped the backup, finish this station
+                    search_state["phase"] = "DONE"
                 elif state == "SEARCH":
                     search_state = new_search_state(current_station)
                     detector.reset()
@@ -274,14 +287,17 @@ def main():
         #Lucky this is the search state so this is where you would put the object detection in#################################
         #When it detects the object get it to switch to the 
         elif state == "SEARCH":
-            #Only check the camera while facing the station, not while turning
-            holding = search_state["phase"] == "HOLD"
-            if holding and detector.update(camera_bgr()):
-                print(f"Target found at {current_station['id']}")
+            #Only check the camera while backing away from the station, not while turning
+            scanning = search_state["phase"] == "BACKUP"
+            found = scanning and detector.update(camera_bgr())
+            best = (f"best target score {detector.best_target} (need {MIN_INLIERS}), "
+                    f"best other {detector.best_other} ({detector.best_other_name})")
+            if found:
+                print(f"Target found at {current_station['id']}, {best}")
                 state = "FOUND"
                 set_speed(0.0, 0.0)
             elif search_step(pose, search_state):
-                print(f"No target at {current_station['id']} station dropped")
+                print(f"No target at {current_station['id']}, {best}, station dropped")
                 remaining_stations = [s for s in remaining_stations if s["id"] != current_station["id"]]
                 state = "NAVIGATION"
                 need_path = True
