@@ -7,7 +7,7 @@ import math
 
 from project_utils import RES, grid_to_world
 
-#Closest a line may pass an obstacle (m), e-puck radius plus margin
+#Closest a line may pass an obstacle, e-puck radius plus margin
 CLEARANCE_M = 0.045
 #Gap between points checked along a line, in cells
 SAMPLE_STEP = 0.2
@@ -67,7 +67,7 @@ def smooth_path(grid, path):
     return merge_straight(smoothed)
 
 
-#Smoothed path as world waypoints, skipping the start cell
+#Smoothed path as world waypoints skipping the start cell
 def smooth_waypoints(grid, path):
     return [grid_to_world(*cell) for cell in smooth_path(grid, path)[1:]]
 
