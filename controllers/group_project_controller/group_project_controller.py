@@ -280,8 +280,7 @@ def main():
                 search_state = new_search_state(current_station)
                 detector.reset()
 
-        #Lucky this is the search state so this is where you would put the object detection in#################################
-        #When it detects the object get it to switch to the 
+        #When it detects the object it will switch 
         elif state == "SEARCH":
             #Only scan while backing away, not while turning
             scanning = search_state["phase"] == "BACKUP"
