@@ -270,6 +270,7 @@ def main():
 
                 print(f"Moving to station: {current_station['id']}")
                 waypoints = smooth_waypoints(GRID, path) if SMOOTH_PATHS else path_to_waypoints(path)
+                print(f"Waypoints: {len(path_to_waypoints(path))} before smoothing, {len(waypoints)} used")
                 nav_state = {"index": 0, "phase": "ROTATE" if waypoints else "DONE"}
 
             drive_step(pose, waypoints, nav_state)
