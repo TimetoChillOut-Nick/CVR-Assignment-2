@@ -4,3 +4,4 @@ worlds/
 controllers/group_project_controller/__pycache__/safety_helper.cpython-311.pyc
 *.wbproj
 *.pyc
+/controllers/group_project_controller/__pycache__
