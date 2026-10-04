@@ -1,5 +1,5 @@
 """
-Target detection using ORB feature matching between the target
+Target detection using SIFT feature matching between the target
 reference image and the robot camera frame.
 """
 
