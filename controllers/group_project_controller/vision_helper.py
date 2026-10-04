@@ -97,8 +97,7 @@ def verify_matches(reference_keypoints, frame_keypoints, matches):
     return int(mask.sum())
 
 
-#reference features for the mission target, every other target, and the
-#distractor images used only as negative examples
+#reference features for the mission target,
 def build_references():
     references = {}
     for label in CONFIG["target_labels"]:
